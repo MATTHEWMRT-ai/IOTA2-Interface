@@ -11,14 +11,6 @@ Le projet se concentre sur le territoire du **Cambodge** et intègre des donnée
 
 ---
 
-## ✨ Fonctionnalités Principales
-* **🗺️ Visualisation Cartographique :** Affichage interactif des tuiles `.tif` classifiées directement sur une carte web (via `folium` ou `pydeck`).
-* **📊 Statistiques Zonales :** Calcul en temps réel de la superficie de chaque classe (en hectares) pour une zone donnée.
-* **🔍 Inspection des Features :** Visualisation des couches externes utilisées par l'algorithme (ex: carte de distance à la mer avec plafonnement à 20km).
-* **📥 Export des Données :** Possibilité de télécharger les rapports statistiques au format CSV.
-
----
-
 ## 🛠️ Prérequis et Installation
 
 ### 1. Cloner le dépôt
@@ -79,8 +71,6 @@ Plaintext
 Les données visualisées par cette application sont le fruit d'un pipeline de Data Engineering strict :
 
     Découpage chirurgical : Tuilage (ex: T48PUV) en blocs de 10980x10980 pixels.
-
-    Data Scaling : Nettoyage des valeurs NoData (remplacement des -9999) et encodage en Float32 pour optimiser le poids des matrices.
 
     Apprentissage : Modèle Random Forest entraîné sur des points de vérité terrain (Shapefiles) minutieusement répartis pour éviter les biais géographiques.
     
