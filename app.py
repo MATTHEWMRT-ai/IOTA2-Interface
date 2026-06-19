@@ -2,18 +2,22 @@ import streamlit as st
 import subprocess
 import os
 import re
-import shutil
+import glob
+import platform
 
-# --- FIXED CONFIGURATION ---
-PIXI_EXE = "/home/kheobs/.pixi/bin/pixi"
-OUTPUT_FOLDER = "/media/kheobs/DATA/IOTA2_TEST_ZONE/IOTA2_Outputs/Results_classif"
+# ==========================================
+# PATH CONFIGURATION
+# ==========================================
+PIXI_EXE = "XXXXX/.pixi/bin/pixi"
+IOTA2_DIR = "XXXXXX/iota2"
+SCRIPT_REL_PATH = "iota2/Iota2.py"
 
-# Page configuration
-st.set_page_config(page_title="IOTA2 Expert Panel", layout="wide")
-st.title("🛰️ IOTA2 - Classification Interface")
+st.set_page_config(page_title="IOTA2 Control Panel", layout="wide")
+st.title("🛰️ IOTA2 - Control Panel")
+st.markdown("---")
 
 # --- SIDEBAR ---
-st.sidebar.header("📁 File Configuration")
+st.sidebar.header("📁 Configuration Files")
 
 def get_file_path(uploaded_file, text_path):
     if uploaded_file is not None:
@@ -23,120 +27,172 @@ def get_file_path(uploaded_file, text_path):
         return save_path
     return text_path
 
-u_cfg = st.sidebar.file_uploader("Upload .cfg", type=["cfg"])
-p_cfg = st.sidebar.text_input("Path to .cfg", "/media/kheobs/DATA/IOTA2_TEST_ZONE/i2_tutorial_classification.cfg")
+u_cfg = st.sidebar.file_uploader("Upload Main .cfg", type=["cfg"])
+p_cfg = st.sidebar.text_input("Path to Main .cfg", "XXXXXXXXXXXXXXXX/i2_classification.cfg")
 
 u_col = st.sidebar.file_uploader("Upload colorFile.txt", type=["txt"])
-p_col = st.sidebar.text_input("Path to colors", "/media/kheobs/DATA/IOTA2_TEST_ZONE/colorFile.txt")
+p_col = st.sidebar.text_input("Path to colors", "XXXXXXXXXXXXXXX/colorFile.txt")
 
 u_nom = st.sidebar.file_uploader("Upload nomenclature", type=["txt"])
-p_nom = st.sidebar.text_input("Path to nomenclature", "/media/kheobs/DATA/IOTA2_TEST_ZONE/nomenclature23.txt")
+p_nom = st.sidebar.text_input("Path to nomenclature", "XXXXXXXXXX/nomenclature23.txt")
+
+# --- NOUVEAU : Fichier de ressources Dask ---
+st.sidebar.markdown("---")
+st.sidebar.subheader("🎛️ Dask Resources Config")
+u_res = st.sidebar.file_uploader("Upload config_ressources.cfg", type=["cfg"])
+p_res = st.sidebar.text_input("Path to config_ressources", "XXXXXXXXXXXXXXXX/config_ressources_example.cfg")
+
+# --- Dossier sensor_data ---
+st.sidebar.markdown("---")
+st.sidebar.subheader("🛰️ Sensor Data")
+p_sensor = st.sidebar.text_input("Path to sensor_data folder", "XXXXXXXXXXXXX/sensor_data")
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("⚙️ Algorithm Parameters")
-scheduler_choice = st.sidebar.radio("Execution mode", ["debug"])
-nb_trees = st.sidebar.slider("Number of trees (nbtrees)", 10, 500, 100, 10)
-train_ratio = st.sidebar.slider("Training ratio (%)", 1, 100, 10, 5) / 100
+st.sidebar.subheader("⚙️ Settings & Hardware")
+st.sidebar.info("💡 Make sure your resource config matches your parallel tasks!")
 
+scheduler_choice = st.sidebar.selectbox("Execution Mode", ["localCluster", "debug"])
+
+if scheduler_choice == "localCluster":
+    st.sidebar.success("🛡️ localCluster selected: 'ulimit' and 'exports' applied securely.")
+
+output_folder = st.sidebar.text_input("Output Folder", "XXXXXXXXXXXX/IOTA2_output")
+
+# --- NOUVEAU : Paramètres de parallélisation ---
+st.sidebar.markdown("---")
+st.sidebar.subheader("🚀Performance")
+nb_tasks = st.sidebar.number_input("Number of Parallel Tasks (-nb_parallel_tasks)", min_value=1, max_value=64, value=4, step=1)
+
+ram_limit = st.sidebar.slider(
+    "OTB Max RAM Hint (MB)", 
+    min_value=128, 
+    max_value=32000, 
+    value=8192, 
+    step=512, 
+    help="Limits internal RAM per OTB process. 8192 = 8GB."
+)
+
+# --- PATH VARIABLES RESOLUTION ---
 final_config_orig = get_file_path(u_cfg, p_cfg)
 final_color = get_file_path(u_col, p_col)
 final_nom = get_file_path(u_nom, p_nom)
-
-BASE_FINAL = os.path.join(OUTPUT_FOLDER, "final")
+final_res = get_file_path(u_res, p_res)  # Résolution du fichier de ressources
+BASE_FINAL = os.path.join(output_folder, "final")
 matrix_path = os.path.join(BASE_FINAL, "Confusion_Matrix_Classif_Seed_0.png")
-map_path = os.path.join(BASE_FINAL, "Classif_Seed_0_ColorIndexed.tif")
-preview_path = os.path.join(BASE_FINAL, "Color_Preview.png")
 
 # --- TECHNICAL FUNCTIONS ---
-
-def prepare_iota_config(path, trees, ratio, nomenclature, color):
+def prepare_iota_config(path, nomenclature, color, out_folder):
     if not os.path.exists(path): return None
     with open(path, 'r') as f:
         content = f.read()
-    if "classifier.rf.nbtrees" in content:
-        content = re.sub(r"('classifier.rf.nbtrees'\s*:\s*)\d+", rf"\g<1>{trees}", content)
-    else:
-        content = content.replace("'classifier.rf.min'", f"'classifier.rf.nbtrees': {trees}, 'classifier.rf.min'")
-    content = re.sub(r"('strategy.percent.p'\s*:\s*)[0-9.]+", rf"\g<1>{ratio}", content)
+    
     content = re.sub(r"(nomenclature_path\s*:\s*).*?\n", rf"\g<1>'{nomenclature}'\n", content)
     content = re.sub(r"(color_table\s*:\s*).*?\n", rf"\g<1>'{color}'\n", content)
+    content = re.sub(r"(output_path\s*:\s*).*?\n", rf"\g<1>'{out_folder}'\n", content)
+    content = re.sub(r"(remove_output_path\s*:\s*).*?\n", r"\g<1>True\n", content)
+    
     custom_path = "/tmp/iota2_auto_config.cfg"
     with open(custom_path, 'w') as f:
         f.write(content)
     return custom_path
 
-def convert_to_png(tif, png, c_file):
-    if not os.path.exists(tif): return False
-    try:
-        tmp = tif.replace(".tif", "_tmp.tif")
-        subprocess.run(["gdaldem", "color-relief", tif, c_file, tmp, "-alpha"], check=True)
-        subprocess.run(["gdal_translate", "-of", "PNG", tmp, png], check=True)
-        if os.path.exists(tmp): os.remove(tmp)
-        return True
-    except: return False
-
-# --- ACTION ZONE ---
-
-st.info(f"🚀 **Config:** {scheduler_choice} | 🌳 {nb_trees} trees | 📊 Ratio {int(train_ratio*100)}%")
-
-col_btn1, col_btn2 = st.columns(2)
-
-with col_btn2:
-    # RESET BUTTON: ONLY performs cleanup
-    if st.button("♻️ RESET (Clean folders)", use_container_width=True, type="primary"):
-        with st.status("Deep cleaning in progress...", expanded=True) as status:
-            if os.path.exists(OUTPUT_FOLDER):
-                shutil.rmtree(OUTPUT_FOLDER, ignore_errors=True)
-            
-            tmp_cfg = "/tmp/iota2_auto_config.cfg"
-            if os.path.exists(tmp_cfg):
-                os.remove(tmp_cfg)
-                
-            os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-            status.update(label="Folders cleaned. Ready for a new calculation!", state="complete")
-        st.toast("System reset", icon="🧹")
-
-with col_btn1:
-    # RUN BUTTON: Performs preparation and calculation
-    if st.button("🚀 RUN CALCULATION", use_container_width=True):
-        work_cfg = prepare_iota_config(final_config_orig, nb_trees, train_ratio, final_nom, final_color)
+def purge_stacks(sensor_path):
+    if not os.path.exists(sensor_path):
+        return 0
         
+    files = glob.glob(os.path.join(sensor_path, "**/*_STACK.tif"), recursive=True) + \
+            glob.glob(os.path.join(sensor_path, "**/*_BINARY_MASK.tif"), recursive=True)
+    for f in files:
+        try: os.remove(f)
+        except: pass
+    return len(files)
+
+# --- SECTION 1 : STANDARD PROCESSING ---
+st.header("1. Standard Processing (Training / Test)")
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("🚀 LAUNCH IOTA2 (HPC Mode)", use_container_width=True):
+        work_cfg = prepare_iota_config(final_config_orig, final_nom, final_color, output_folder)
         if work_cfg:
-            cmd = [PIXI_EXE, "run", "Iota2.py", "-config", work_cfg, "-scheduler_type", scheduler_choice, "-restart"]
+            my_env = os.environ.copy()
+            my_env["PYTHONPATH"] = f"{IOTA2_DIR}:{my_env.get('PYTHONPATH', '')}"
+            my_env["PATH"] = f"{IOTA2_DIR}/iota2:{my_env.get('PATH', '')}"
+            my_env["PYTHONNOUSERSITE"] = "1"
+            my_env["OTB_MAX_RAM_HINT"] = str(ram_limit)
             
-            with st.expander("IOTA2 Calculation Logs", expanded=True):
-                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                for line in process.stdout:
-                    st.text(line.strip())
-                process.wait()
-            
-            # Smart check (if the map exists, it's good)
-            if os.path.exists(map_path) or process.returncode == 0:
-                st.success("✅ Calculation completed successfully!")
-                convert_to_png(map_path, preview_path, final_color)
-                st.balloons()
+            # --- MISE À JOUR DE LA COMMANDE D'EXÉCUTION ---
+            if scheduler_choice == "localCluster":
+                bash_command = (
+                    "ulimit -n 65535 && "
+                    f"export PATH=\"{IOTA2_DIR}/iota2:$PATH\" && "
+                    f"export PYTHONPATH=\"{IOTA2_DIR}:$PYTHONPATH\" && "
+                    f"export OTB_MAX_RAM_HINT={ram_limit} && "
+                    f"{PIXI_EXE} run python {SCRIPT_REL_PATH} "
+                    f"-config {work_cfg} "
+                    f"-config_ressources {final_res} "
+                    f"-nb_parallel_tasks {nb_tasks} "
+                    f"-scheduler_type {scheduler_choice}"
+                )
+                cmd = ["bash", "-c", bash_command]
             else:
-                st.error("Finished or error, check the logs.")
+                cmd = [
+                    PIXI_EXE, "run", "python", SCRIPT_REL_PATH, 
+                    "-config", work_cfg,
+                    "-config_ressources", final_res,
+                    "-nb_parallel_tasks", str(nb_tasks),
+                    "-scheduler_type", scheduler_choice
+                ]
+            
+            with st.expander("Live Logs", expanded=True):
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=IOTA2_DIR, env=my_env)
+                for line in process.stdout: st.text(line.strip())
+                process.wait()
+
+with col2:
+    if st.button("🧹 MANUAL RESET & PURGE (Sensor Data)", use_container_width=True, type="primary"):
+        nb = purge_stacks(p_sensor)
+        st.success(f"Disk cleaned: {nb} old _STACK / _BINARY_MASK files deleted from {p_sensor}.")
 
 st.markdown("---")
 
-# --- RESULTS ---
-st.header("📊 Results")
-c1, c2 = st.columns(2)
-W = 700
+# --- SECTION 2 : RESULTS ---
+st.header("2. Results")
 
-with c1:
-    st.subheader("📈 Confusion Matrix")
+def create_map_preview(tif_path, png_path):
+    if os.path.exists(png_path) and os.path.getmtime(png_path) > os.path.getmtime(tif_path):
+        return True
+    
+    with st.spinner("🖼️ Generating map preview from heavy .tif..."):
+        try:
+            cmd = [PIXI_EXE, "run", "gdal_translate", "-of", "PNG", "-outsize", "800", "0", tif_path, png_path]
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except Exception as e:
+            st.error(f"Error generating preview: {e}")
+            return False
+
+col_res1, col_res2 = st.columns(2)
+
+with col_res1:
+    st.subheader("Confusion Matrix")
     if os.path.exists(matrix_path):
-        st.image(matrix_path, width=W)
+        st.image(matrix_path, caption="Latest Confusion Matrix", use_container_width=True)
     else:
-        st.warning("Matrix not found.")
+        st.info("Waiting for the confusion matrix to be generated...")
 
-with c2:
-    st.subheader("🗺️ Map")
-    if os.path.exists(map_path) and not os.path.exists(preview_path):
-        convert_to_png(map_path, preview_path, final_color)
-    if os.path.exists(preview_path):
-        st.image(preview_path, width=W)
+with col_res2:
+    st.subheader("Classification Map")
+    final_tifs = glob.glob(os.path.join(BASE_FINAL, "*Classif*.tif"))
+    
+    if final_tifs:
+        main_tif = final_tifs[0] 
+        preview_path = os.path.join(BASE_FINAL, "map_preview.png")
+        
+        if create_map_preview(main_tif, preview_path):
+            st.image(preview_path, caption="Final Classification Map (Preview)", use_container_width=True)
+            
+            if st.button("📂 Open Results Folder"):
+                subprocess.Popen(["xdg-open", BASE_FINAL]) # 'xdg-open' au lieu de 'explorer.exe' pour Linux
     else:
-        st.info("The map will appear here.")
+        st.info("Waiting for the final .tif classification map...")
