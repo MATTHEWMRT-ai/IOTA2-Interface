@@ -5,9 +5,9 @@
 ![GDAL](https://img.shields.io/badge/GDAL-000000?style=for-the-badge&logo=qgis&logoColor=white)
 
 ## 📖 Description du Projet
-Cette application interactive développée avec **Streamlit** permet de visualiser et d'analyser les résultats de classification de l'occupation du sol (Land Cover) générés par la chaîne de traitement **IOTA2** (modèle Random Forest). 
+Cette application interactive développée avec **Streamlit** permet de générer et visualiser les résultats de classification de l'occupation du sol (Land Cover) générés par la chaîne de traitement **IOTA2** (modèle Random Forest). 
 
-Le projet se concentre sur le territoire du **Cambodge** et intègre des données optiques (Sentinel-2) ainsi que des features externes (Distance à la mer, Densité de bâtiments, MNT) pour différencier avec précision 11 classes environnementales (Mangrove, Forêt, Agriculture, Tissu urbain, etc.).
+Le projet se concentre sur le territoire du **Cambodge** et intègre des données optiques (Sentinel-2) ainsi que des features externes (Distance à la mer, Densité de bâtiments, MNT) pour différencier avec précision 12 classes environnementales (Mangrove, Forêt, Agriculture, Tissu urbain, etc.).
 
 ---
 
